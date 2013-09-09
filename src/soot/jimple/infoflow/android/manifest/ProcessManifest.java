@@ -35,9 +35,9 @@ import android.content.res.AXmlResourceParser;
 public class ProcessManifest {
 	
 	private final Set<String> entryPointsClasses = new HashSet<String>();
-	private String packageName = "";
+	private String packageName = null;
 	private String applicationName = "";
-	private final Set<String> permissions = new HashSet<String>();
+	private final Set<String> usedPermissions = new HashSet<String>();
 	
 	/**
 	 * Opens the given apk file and provides the given handler with a stream for
@@ -121,14 +121,14 @@ public class ProcessManifest {
 							
 							// Get the class name
 							attrValue = getAttributeValue(parser, "name");
-							entryPointsClasses.add(expandClassName(attrValue));
+							this.entryPointsClasses.add(expandClassName(attrValue));
 						}
 						else if (tagName.equals("uses-permission")) {
 							String permissionName = getAttributeValue(parser, "name");
 							// We probably don't want to do this in some cases, so leave it
 							// to the user
 							// permissionName = permissionName.substring(permissionName.lastIndexOf(".") + 1);
-							this.permissions.add(permissionName);
+							addUsedPermission(permissionName);
 						}
 						else if (tagName.equals("application")) {
 							// Check whether the application is disabled
@@ -213,7 +213,7 @@ public class ProcessManifest {
 				NodeList permissions = appElement.getElementsByTagName("uses-permission");
 				for (int i = 0; i < permissions.getLength(); i++) {
 					Element permission = (Element) permissions.item(i);
-					this.permissions.add(permission.getAttribute("android:name"));
+					this.usedPermissions.add(permission.getAttribute("android:name"));
 				}
 			}			
 		}
@@ -237,18 +237,34 @@ public class ProcessManifest {
 		entryPointsClasses.add(expandClassName(className));
 	}
 
+	protected void addEntryPointClass(String className) {
+		this.entryPointsClasses.add(className);
+	}
+	
 	public Set<String> getEntryPointClasses() {
 		return this.entryPointsClasses;
+	}
+	
+	protected void setApplicationName(String applicationName) {
+		this.applicationName = applicationName;
 	}
 	
 	public String getApplicationName() {
 		return this.applicationName;
 	}
 	
-	public Set<String> getPermissions() {
-		return this.permissions;
+	protected void addUsedPermission(String permission) {
+		this.usedPermissions.add(permission);
+	}
+	
+	public Set<String> getUsedPermissions() {
+		return this.usedPermissions;
 	}
 
+	protected void setPackageName(String packageName) {
+		this.packageName = packageName;
+	}
+	
 	public String getPackageName() {
 		return this.packageName;
 	}
