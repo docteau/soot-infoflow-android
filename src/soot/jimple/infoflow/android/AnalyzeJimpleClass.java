@@ -11,8 +11,8 @@
 package soot.jimple.infoflow.android;
 
 import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -86,7 +86,8 @@ public class AnalyzeJimpleClass {
 		Set<String> androidCallbacks = new HashSet<String>();
 		BufferedReader rdr = null;
 		try {
-			rdr = new BufferedReader(new FileReader("AndroidCallbacks.txt"));
+			rdr = new BufferedReader(new InputStreamReader(this.getClass().getResourceAsStream(
+					"/res/AndroidCallbacks.txt")));
 			String line;
 			while ((line = rdr.readLine()) != null)
 				if (!line.isEmpty())
