@@ -35,9 +35,17 @@ import android.content.res.AXmlResourceParser;
 public class ProcessManifest {
 	
 	private final Set<String> entryPointsClasses = new HashSet<String>();
-	private String packageName = null;
-	private String applicationName = "";
 	private final Set<String> usedPermissions = new HashSet<String>();
+	private String applicationName = "";
+	
+	private int versionCode = -1;
+	private String versionName = "";
+
+	private String packageName = "";
+	private int minSdkVersion = -1;
+	private int targetSdkVersion = -1;
+	
+	private final Set<String> permissions = new HashSet<String>();
 	
 	/**
 	 * Opens the given apk file and provides the given handler with a stream for
@@ -106,8 +114,13 @@ public class ProcessManifest {
 						break;
 					case XmlPullParser.START_TAG:
 						String tagName = parser.getName();
-						if (tagName.equals("manifest"))
+						if (tagName.equals("manifest")) {
 							this.packageName = getAttributeValue(parser, "package");
+							String versionCode = getAttributeValue(parser, "versionCode");
+							if (versionCode != null && versionCode.length() > 0)
+								this.versionCode = Integer.valueOf(versionCode);
+							this.versionName = getAttributeValue(parser, "versionName");
+						}
 						else if (tagName.equals("activity")
 								|| tagName.equals("receiver")
 								|| tagName.equals("service")
@@ -129,6 +142,14 @@ public class ProcessManifest {
 							// to the user
 							// permissionName = permissionName.substring(permissionName.lastIndexOf(".") + 1);
 							addUsedPermission(permissionName);
+						}
+						else if (tagName.equals("uses-sdk")) {
+							String minVersion = getAttributeValue(parser, "minSdkVersion");
+							if (minVersion != null && minVersion.length() > 0)
+								this.minSdkVersion = Integer.valueOf(minVersion);
+							String targetVersion = getAttributeValue(parser, "targetSdkVersion");
+							if (targetVersion != null && targetVersion.length() > 0)
+								this.targetSdkVersion = Integer.valueOf(targetVersion);
 						}
 						else if (tagName.equals("application")) {
 							// Check whether the application is disabled
@@ -182,6 +203,10 @@ public class ProcessManifest {
 			
 			Element rootElement = doc.getDocumentElement();
 			this.packageName = rootElement.getAttribute("package");
+			String versionCode = rootElement.getAttribute("android:versionCode");
+			if (versionCode != null && versionCode.length() > 0)
+				this.versionCode = Integer.valueOf(versionCode);
+			this.versionName = rootElement.getAttribute("android:versionName");
 			
 			NodeList appsElement = rootElement.getElementsByTagName("application");
 			if (appsElement.getLength() > 1)
@@ -215,6 +240,17 @@ public class ProcessManifest {
 					Element permission = (Element) permissions.item(i);
 					this.usedPermissions.add(permission.getAttribute("android:name"));
 				}
+
+				NodeList usesSdkList = appElement.getElementsByTagName("uses-sdk");
+				for (int i = 0; i < usesSdkList.getLength(); i++) {
+					Element usesSdk = (Element) usesSdkList.item(i);
+					String minVersion = usesSdk.getAttribute("android:minSdkVersion");
+					if (minVersion != null && minVersion.length() > 0)
+						this.minSdkVersion = Integer.valueOf(minVersion);
+					String targetVersion = usesSdk.getAttribute("android:targetSdkVersion");
+					if (targetVersion != null && targetVersion.length() > 0)
+						this.targetSdkVersion = Integer.valueOf(targetVersion);
+				}
 			}			
 		}
 		catch (IOException ex) {
@@ -240,7 +276,7 @@ public class ProcessManifest {
 	protected void addEntryPointClass(String className) {
 		this.entryPointsClasses.add(className);
 	}
-	
+
 	public Set<String> getEntryPointClasses() {
 		return this.entryPointsClasses;
 	}
@@ -260,6 +296,14 @@ public class ProcessManifest {
 	public Set<String> getPermissions() {
 		return this.usedPermissions;
 	}
+	
+	public int getVersionCode() {
+		return this.versionCode;
+	}
+	
+	public String getVersionName() {
+		return this.versionName;
+	}
 
 	protected void setPackageName(String packageName) {
 		this.packageName = packageName;
@@ -267,6 +311,14 @@ public class ProcessManifest {
 	
 	public String getPackageName() {
 		return this.packageName;
+	}
+
+	public int getMinSdkVersion() {
+		return this.minSdkVersion;
+	}
+	
+	public int targetSdkVersion() {
+		return this.targetSdkVersion;
 	}
 	
 }

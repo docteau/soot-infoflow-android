@@ -10,8 +10,10 @@
  ******************************************************************************/
 package soot.jimple.infoflow.android.TestApps;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
@@ -27,12 +29,14 @@ import java.util.concurrent.TimeoutException;
 
 import soot.SootMethod;
 import soot.Unit;
-import soot.jimple.infoflow.AbstractInfoflowProblem.PathTrackingMethod;
 import soot.jimple.infoflow.InfoflowResults;
+import soot.jimple.infoflow.IInfoflow.CallgraphAlgorithm;
 import soot.jimple.infoflow.InfoflowResults.SinkInfo;
 import soot.jimple.infoflow.InfoflowResults.SourceInfo;
 import soot.jimple.infoflow.android.SetupApplication;
+import soot.jimple.infoflow.android.AndroidSourceSinkManager.LayoutMatchingMode;
 import soot.jimple.infoflow.handlers.ResultsAvailableHandler;
+import soot.jimple.infoflow.taintWrappers.EasyTaintWrapper;
 import soot.jimple.toolkits.ide.icfg.BiDiInterproceduralCFG;
 
 public class Test {
@@ -88,6 +92,19 @@ public class Test {
 	private static int timeout = -1;
 	private static int sysTimeout = -1;
 	
+	private static boolean stopAfterFirstFlow = false;
+	private static boolean implicitFlows = false;
+	private static boolean staticTracking = true;
+	private static boolean enableCallbacks = true;
+	private static boolean enableExceptions = true;
+	private static int accessPathLength = 5;
+	private static LayoutMatchingMode layoutMatchingMode = LayoutMatchingMode.MatchSensitiveOnly;
+	private static boolean flowSensitiveAliasing = true;
+	private static boolean computeResultPaths = true;
+	private static boolean aggressiveTaintWrapper = false;
+	
+	private static CallgraphAlgorithm callgraphAlgorithm = CallgraphAlgorithm.AutomaticSelection;
+	
 	private static boolean DEBUG = false;
 
 	/**
@@ -114,12 +131,14 @@ public class Test {
 		}
 		
 		// Parse additional command-line arguments
-		parseAdditionalOptions(args);
+		if (!parseAdditionalOptions(args))
+			return;
 		if (!validateAdditionalOptions())
 			return;
 		
 		List<String> apkFiles = new ArrayList<String>();
 		File apkFile = new File(args[0]);
+		String extension = apkFile.getName().substring(apkFile.getName().lastIndexOf("."));
 		if (apkFile.isDirectory()) {
 			String[] dirFiles = apkFile.list(new FilenameFilter() {
 			
@@ -132,17 +151,31 @@ public class Test {
 			for (String s : dirFiles)
 				apkFiles.add(s);
 		}
-		else
+		else if (extension.equalsIgnoreCase(".txt")) {
+			BufferedReader rdr = new BufferedReader(new FileReader(apkFile));
+			String line = null;
+			while ((line = rdr.readLine()) != null)
+				apkFiles.add(line);
+			rdr.close();
+		}
+		else if (extension.equalsIgnoreCase(".apk"))
 			apkFiles.add(args[0]);
+		else {
+			System.err.println("Invalid input file format: " + extension);
+			return;
+		}
 
 		for (final String fileName : apkFiles) {
 			final String fullFilePath;
 			
 			// Directory handling
 			if (apkFiles.size() > 1) {
-				fullFilePath = args[0] + File.separator + fileName;
+				if (apkFile.isDirectory())
+					fullFilePath = args[0] + File.separator + fileName;
+				else
+					fullFilePath = fileName;
 				System.out.println("Analyzing file " + fullFilePath + "...");
-				File flagFile = new File("_Run_" + fileName);
+				File flagFile = new File("_Run_" + new File(fileName).getName());
 				if (flagFile.exists())
 					continue;
 				flagFile.createNewFile();
@@ -163,7 +196,7 @@ public class Test {
 	}
 
 
-	private static void parseAdditionalOptions(String[] args) {
+	private static boolean parseAdditionalOptions(String[] args) {
 		int i = 2;
 		while (i < args.length) {
 			if (args[i].equalsIgnoreCase("--timeout")) {
@@ -174,14 +207,78 @@ public class Test {
 				sysTimeout = Integer.valueOf(args[i+1]);
 				i += 2;
 			}
+			else if (args[i].equalsIgnoreCase("--singleflow")) {
+				stopAfterFirstFlow = true;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--implicit")) {
+				implicitFlows = true;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--nostatic")) {
+				staticTracking = false;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--aplength")) {
+				accessPathLength = Integer.valueOf(args[i+1]);
+				i += 2;
+			}
+			else if (args[i].equalsIgnoreCase("--cgalgo")) {
+				String algo = args[i+1];
+				if (algo.equalsIgnoreCase("AUTO"))
+					callgraphAlgorithm = CallgraphAlgorithm.AutomaticSelection;
+				else if (algo.equalsIgnoreCase("VTA"))
+					callgraphAlgorithm = CallgraphAlgorithm.VTA;
+				else if (algo.equalsIgnoreCase("RTA"))
+					callgraphAlgorithm = CallgraphAlgorithm.RTA;
+				else {
+					System.err.println("Invalid callgraph algorithm");
+					return false;
+				}
+				i += 2;
+			}
+			else if (args[i].equalsIgnoreCase("--nocallbacks")) {
+				enableCallbacks = false;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--noexceptions")) {
+				enableExceptions = false;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--layoutmode")) {
+				String algo = args[i+1];
+				if (algo.equalsIgnoreCase("NONE"))
+					layoutMatchingMode = LayoutMatchingMode.NoMatch;
+				else if (algo.equalsIgnoreCase("PWD"))
+					layoutMatchingMode = LayoutMatchingMode.MatchSensitiveOnly;
+				else if (algo.equalsIgnoreCase("ALL"))
+					layoutMatchingMode = LayoutMatchingMode.MatchAll;
+				else {
+					System.err.println("Invalid layout matching mode");
+					return false;
+				}
+				i += 2;
+			}
+			else if (args[i].equalsIgnoreCase("--aliasflowins")) {
+				flowSensitiveAliasing = false;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--nopaths")) {
+				computeResultPaths = false;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--aggressivetw")) {
+				aggressiveTaintWrapper = false;
+				i++;
+			}
 			else
 				i++;
 		}
+		return true;
 	}
 	
 	private static boolean validateAdditionalOptions() {
 		if (timeout > 0 && sysTimeout > 0) {
-			System.err.println("Timeout and system timeout cannot be used together");
 			return false;
 		}
 		return true;
@@ -192,29 +289,12 @@ public class Test {
 
 			@Override
 			public InfoflowResults call() throws Exception {
-				final long beforeRun = System.nanoTime();
-				
-				final SetupApplication app = new SetupApplication(androidJar, fileName);
-				if (new File("../soot-infoflow/EasyTaintWrapperSource.txt").exists())
-					app.setTaintWrapperFile("../soot-infoflow/EasyTaintWrapperSource.txt");
-				else
-					app.setTaintWrapperFile("EasyTaintWrapperSource.txt");
-				app.calculateSourcesSinksEntrypoints("SourcesAndSinks.txt");
-				app.setPathTracking(PathTrackingMethod.ForwardTracking);
-				
-				if (DEBUG) {
-					app.printEntrypoints();
-					app.printSinks();
-					app.printSources();
-				}
 				
 				final BufferedWriter wr = new BufferedWriter(new FileWriter("_out_" + new File(fileName).getName() + ".txt"));
 				try {
-					System.out.println("Running data flow analysis...");
-					final InfoflowResults res = app.runInfoflow(new MyResultsAvailableHandler(wr));
-					System.out.println("Data flow analysis done.");
-
-					System.out.println("Analysis has run for " + (System.nanoTime() - beforeRun) / 1E9 + " seconds");
+					final long beforeRun = System.nanoTime();
+					wr.write("Running data flow analysis...\n");
+					final InfoflowResults res = runAnalysis(fileName, androidJar);
 					wr.write("Analysis has run for " + (System.nanoTime() - beforeRun) / 1E9 + " seconds\n");
 					
 					wr.flush();
@@ -259,7 +339,18 @@ public class Test {
 				"-cp", classpath,
 				"soot.jimple.infoflow.android.TestApps.Test",
 				fileName,
-				androidJar };
+				androidJar,
+				stopAfterFirstFlow ? "--singleflow" : "--nosingleflow",
+				implicitFlows ? "--implicit" : "--noimplicit",
+				staticTracking ? "--static" : "--nostatic", 
+				"--aplength", Integer.toString(accessPathLength),
+				"--cgalgo", callgraphAlgorithmToString(callgraphAlgorithm),
+				enableCallbacks ? "--callbacks" : "--nocallbacks",
+				enableExceptions ? "--exceptions" : "--noexceptions",
+				"--layoutmode", layoutMatchingModeToString(layoutMatchingMode),
+				flowSensitiveAliasing ? "--aliasflowsens" : "--aliasflowins",
+				computeResultPaths ? "--paths" : "--nopaths",
+				aggressiveTaintWrapper ? "--aggressivetw" : "--nonaggressivetw" };
 		System.out.println("Running command: " + executable + " " + command);
 		try {
 			ProcessBuilder pb = new ProcessBuilder(command);
@@ -275,19 +366,58 @@ public class Test {
 			ex.printStackTrace();
 		}
 	}
+	
+	public static String callgraphAlgorithmToString(CallgraphAlgorithm algorihm) {
+		switch (algorihm) {
+			case AutomaticSelection:
+				return "AUTO";
+			case VTA:
+				return "VTA";
+			case RTA:
+				return "RTA";
+			default:
+				return "unknown";
+		}
+	}
 
-	private static void runAnalysis(final String fileName, final String androidJar) {
+	public static String layoutMatchingModeToString(LayoutMatchingMode mode) {
+		switch (mode) {
+			case NoMatch:
+				return "NONE";
+			case MatchSensitiveOnly:
+				return "PWD";
+			case MatchAll:
+				return "ALL";
+			default:
+				return "unknown";
+		}
+	}
+
+	private static InfoflowResults runAnalysis(final String fileName, final String androidJar) {
 		try {
 			final long beforeRun = System.nanoTime();
 				
 			final SetupApplication app = new SetupApplication(androidJar, fileName);
+
+			app.setStopAfterFirstFlow(stopAfterFirstFlow);
+			app.setEnableImplicitFlows(implicitFlows);
+			app.setEnableStaticFieldTracking(staticTracking);
+			app.setEnableCallbacks(enableCallbacks);
+			app.setEnableExceptionTracking(enableExceptions);
+			app.setAccessPathLength(accessPathLength);
+			app.setLayoutMatchingMode(layoutMatchingMode);
+			app.setFlowSensitiveAliasing(flowSensitiveAliasing);
+			app.setComputeResultPaths(computeResultPaths);
+
+			final EasyTaintWrapper taintWrapper;
 			if (new File("../soot-infoflow/EasyTaintWrapperSource.txt").exists())
-				app.setTaintWrapperFile("../soot-infoflow/EasyTaintWrapperSource.txt");
+				taintWrapper = new EasyTaintWrapper("../soot-infoflow/EasyTaintWrapperSource.txt");
 			else
-				app.setTaintWrapperFile("EasyTaintWrapperSource.txt");
+				taintWrapper = new EasyTaintWrapper("EasyTaintWrapperSource.txt");
+			taintWrapper.setAggressiveMode(aggressiveTaintWrapper);
+			app.setTaintWrapper(taintWrapper);
 			app.calculateSourcesSinksEntrypoints("SourcesAndSinks.txt");
-			app.setPathTracking(PathTrackingMethod.ForwardTracking);
-				
+			
 			if (DEBUG) {
 				app.printEntrypoints();
 				app.printSinks();
@@ -295,11 +425,13 @@ public class Test {
 			}
 				
 			System.out.println("Running data flow analysis...");
-			app.runInfoflow(new MyResultsAvailableHandler());
+			final InfoflowResults res = app.runInfoflow(new MyResultsAvailableHandler());
 			System.out.println("Analysis has run for " + (System.nanoTime() - beforeRun) / 1E9 + " seconds");
+			return res;
 		} catch (IOException ex) {
 			System.err.println("Could not read file: " + ex.getMessage());
 			ex.printStackTrace();
+			throw new RuntimeException(ex);
 		}
 	}
 
@@ -310,6 +442,20 @@ public class Test {
 		System.out.println("Optional further parameters:");
 		System.out.println("\t--TIMEOUT n Time out after n seconds");
 		System.out.println("\t--SYSTIMEOUT n Hard time out (kill process) after n seconds, Unix only");
+		System.out.println("\t--SINGLEFLOW Stop after finding first leak");
+		System.out.println("\t--IMPLICIT Enable implicit flows");
+		System.out.println("\t--NOSTATIC Disable static field tracking");
+		System.out.println("\t--NOEXCEPTIONS Disable exception tracking");
+		System.out.println("\t--APLENGTH n Set access path length to n");
+		System.out.println("\t--CGALGO x Use callgraph algorithm x");
+		System.out.println("\t--NOCALLBACKS Disable callback analysis");
+		System.out.println("\t--LAYOUTMODE x Set UI control analysis mode to x");
+		System.out.println("\t--ALIASFLOWINS Use a flow insensitive alias search");
+		System.out.println("\t--NOPATHS Do not compute result paths");
+		System.out.println("\t--AGGRESSIVETW Use taint wrapper in aggressive mode");
+		System.out.println();
+		System.out.println("Supported callgraph algorithms: AUTO, RTA, VTA");
+		System.out.println("Supported layout mode algorithms: NONE, PWD, ALL");
 	}
 
 }

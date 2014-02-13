@@ -15,7 +15,6 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -59,7 +58,7 @@ public class CategorizedAndroidSourceSinkParser{
 			if(m.find()) {
 				CATEGORY cat = CATEGORY.valueOf(m.group(5));
 				
-				if(cat == CATEGORY.ALL || categories.contains(cat)){
+				if(categories.contains(CATEGORY.ALL) || categories.contains(cat)){
 					AndroidMethod method = parseMethod(m);
 					method.setCategory(cat);
 					

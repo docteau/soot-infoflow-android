@@ -213,6 +213,12 @@ public class ARSCFileParser extends AbstractResourceParser {
     protected final static int COMPLEX_MANTISSA_SHIFT = 8;
     protected final static int COMPLEX_MANTISSA_MASK = 0xffffff;
     
+    protected static final float MANTISSA_MULT = 1.0f / (1 << COMPLEX_MANTISSA_SHIFT);
+    protected static final float[] RADIX_MULTS = new float[] {
+        1.0f * MANTISSA_MULT, 1.0f / (1<<7) * MANTISSA_MULT,
+        1.0f / (1<<15) * MANTISSA_MULT, 1.0f / (1<<23) * MANTISSA_MULT
+    };
+    
 	/**
 	 * If set, this is a complex entry, holding a set of name/value mappings.
 	 * It is followed by an array of ResTable_Map structures.
@@ -274,8 +280,23 @@ public class ARSCFileParser extends AbstractResourceParser {
 			for (ResConfig rc : this.configurations)
 				for (AbstractResource res : rc.getResources())
 					if (!resources.containsKey(res.resourceName))
-							resources.put(res.resourceName, res);
+						resources.put(res.resourceName, res);
 			return resources.values();
+		}
+		
+		/**
+		 * Gets the first resource with the given name or null if no such
+		 * resource exists
+		 * @param resourceName The resource name to look for
+		 * @return The first resource with the given name or null if no such
+		 * resource exists
+		 */
+		public AbstractResource getResourceByName(String resourceName) {
+			for (ResConfig rc : this.configurations)
+				for (AbstractResource res : rc.getResources())
+					if (res.getResourceName().equals(resourceName))
+						return res;
+			return null;
 		}
 		
 		/**
@@ -471,6 +492,43 @@ public class ARSCFileParser extends AbstractResourceParser {
 
 		public int getB() {
 			return this.b;
+		}
+	}
+	
+	/**
+	 * Enumeration containing the types of fractions supported in Android
+	 */
+	public enum FractionType {
+		/**
+		 * A basic fraction of the overall size.
+		 */
+		Fraction,
+		
+		/**
+		 * A fraction of the parent size.
+		 */
+		FractionParent
+	}
+	
+	/**
+	 * Android resource containing fraction data (e.g. element width relative to
+	 * some other control).
+	 */
+	public class FractionResource extends AbstractResource {
+		private FractionType type;
+		private float value;
+		
+		public FractionResource(FractionType type, float value) {
+			this.type = type;
+			this.value = value;
+		}
+		
+		public FractionType getType() {
+			return this.type;
+		}
+		
+		public float getValue() {
+			return this.value;
 		}
 	}
 	
@@ -1105,11 +1163,9 @@ public class ARSCFileParser extends AbstractResourceParser {
 								res.resourceName = keyStrings.get(entry.key);
 							else
 								res.resourceName = "<INVALID RESOURCE>";
-							for (AbstractResource r : resType.getAllResources())
-								if (r.getResourceName().equals(res.resourceName)) {
-									res.resourceID = r.resourceID;
-									break;
-								}
+							AbstractResource r = resType.getResourceByName(res.resourceName);
+							if (r != null)
+								res.resourceID = r.resourceID;
 							if (res.resourceID <= 0)
 								res.resourceID = (packageTable.id << 24)
 										+ (typeTable.id << 16) + resourceIdx;
@@ -1163,7 +1219,18 @@ public class ARSCFileParser extends AbstractResourceParser {
 				|| map.name == ATTR_MANY;
 	}
 
-	private AbstractResource parseValue(Res_Value val) {
+	/**
+	 * Taken from https://github.com/menethil/ApkTool/blob/master/src/android/util/TypedValue.java
+	 * @param complex
+	 * @return
+	 */
+    protected static float complexToFloat(int complex)
+    {
+        return (complex&(COMPLEX_MANTISSA_MASK << COMPLEX_MANTISSA_SHIFT))
+            * RADIX_MULTS[(complex>>COMPLEX_RADIX_SHIFT) & COMPLEX_RADIX_MASK];
+    }
+
+    private AbstractResource parseValue(Res_Value val) {
 		AbstractResource res;
 		switch (val.dataType) {
 			case TYPE_NULL:
@@ -1186,24 +1253,12 @@ public class ARSCFileParser extends AbstractResourceParser {
 				res = new BooleanResource(val.data);
 				break;
 			case TYPE_INT_COLOR_ARGB8:
+			case TYPE_INT_COLOR_RGB8:
+			case TYPE_INT_COLOR_ARGB4:
+			case TYPE_INT_COLOR_RGB4:
 				res = new ColorResource(val.data & 0xFF000000 >> 3 * 8,
 						val.data & 0x00FF0000 >> 2 * 8, val.data & 0x0000FF00 >> 8,
 						val.data & 0x000000FF);
-				break;
-			case TYPE_INT_COLOR_RGB8:
-				res = new ColorResource(0,
-						val.data & 0xFF0000 >> 2 * 8, val.data & 0x00FF00 >> 8,
-						val.data & 0x0000FF);
-				break;
-			case TYPE_INT_COLOR_ARGB4:
-				res = new ColorResource(val.data & 0xF000 >> 3 * 8,
-						val.data & 0x0F00 >> 2 * 8, val.data & 0x00F0 >> 8,
-						val.data & 0x000F);
-				break;
-			case TYPE_INT_COLOR_RGB4:
-				res = new ColorResource(0,
-						val.data & 0xF00 >> 2 * 8, val.data & 0x0F0 >> 8,
-						val.data & 0x00F);
 				break;
 			case TYPE_DIMENSION:
 				res = new DimensionResource(val.data & COMPLEX_UNIT_MASK,
@@ -1211,6 +1266,14 @@ public class ARSCFileParser extends AbstractResourceParser {
 				break;
 			case TYPE_FLOAT:
 				res = new FloatResource(Float.intBitsToFloat(val.data));
+				break;
+			case TYPE_FRACTION:
+				int fracType = (val.data >> COMPLEX_UNIT_SHIFT) & COMPLEX_UNIT_MASK;
+				float data = complexToFloat(val.data);
+				if (fracType == COMPLEX_UNIT_FRACTION)
+					res = new FractionResource(FractionType.Fraction, data);
+				else
+					res = new FractionResource(FractionType.FractionParent, data);
 				break;
 			default:
 				return null;
@@ -1468,12 +1531,11 @@ public class ARSCFileParser extends AbstractResourceParser {
 	private String readStringUTF8(byte[] remainingData, int stringIdx) throws IOException {
 		// skip the length, will usually be 0x1A1A
 		// int strLen = readUInt16(remainingData, stringIdx);
+		// the length here is somehow weird
+		int strLen = readUInt8(remainingData, stringIdx + 1);
 		stringIdx += 2;
-		
-		StringBuilder builder = new StringBuilder();
-		while (remainingData[stringIdx] != 0)
-			builder.append((char) remainingData[stringIdx++]);
-		return builder.toString();
+		String str = new String(remainingData, stringIdx, strLen, "UTF-8");
+		return str;
 	}
 
 	private int parseStringPoolHeader
