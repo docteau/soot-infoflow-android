@@ -383,6 +383,7 @@ public class AnalyzeJimpleClass {
 		
 		// Do we implement one of the well-known interfaces?
 		for (SootClass i : collectAllInterfaces(sootClass)) {
+			try {
 			// android.accounts
 			if (i.getName().equals("android.accounts.OnAccountsUpdateListener")) {
 				if (i.declaresMethodByName("onAccountsUpdated"))
@@ -1337,6 +1338,9 @@ public class AnalyzeJimpleClass {
 					checkAndAddMethod(getMethodFromHierarchy(baseClass, "onVisibilityChanged"), lifecycleElement);
 				if (i.declaresMethodByName("onZoom"))
 					checkAndAddMethod(getMethodFromHierarchy(baseClass, "onZoom"), lifecycleElement);
+			}
+			} catch (RuntimeException exception) {
+				continue;
 			}
 		}
 	}

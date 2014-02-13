@@ -257,7 +257,7 @@ public class ProcessManifest {
 		this.usedPermissions.add(permission);
 	}
 	
-	public Set<String> getUsedPermissions() {
+	public Set<String> getPermissions() {
 		return this.usedPermissions;
 	}
 
