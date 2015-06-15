@@ -12,12 +12,10 @@ package soot.jimple.infoflow.android.test.otherAPKs;
 
 import java.io.IOException;
 
-import junit.framework.Assert;
+import org.xmlpull.v1.XmlPullParserException;
 
-import org.junit.Test;
-
-import soot.jimple.infoflow.InfoflowResults;
 import soot.jimple.infoflow.android.SetupApplication;
+import soot.jimple.infoflow.results.InfoflowResults;
 import soot.jimple.infoflow.taintWrappers.EasyTaintWrapper;
 
 public class JUnitTests {
@@ -28,8 +26,11 @@ public class JUnitTests {
 	 * @return The data leaks found in the given APK file
 	 * @throws IOException Thrown if the given APK file or any other required
 	 * file could not be found
+	 * @throws XmlPullParserException Thrown if the Android manifest file could
+	 * not be read.
 	 */
-	public InfoflowResults analyzeAPKFile(String fileName) throws IOException {
+	public InfoflowResults analyzeAPKFile(String fileName)
+			throws IOException, XmlPullParserException {
 		return analyzeAPKFile(fileName, false, true, false);
 	}
 	
@@ -45,10 +46,15 @@ public class JUnitTests {
 	 * @return The data leaks found in the given APK file
 	 * @throws IOException Thrown if the given APK file or any other required
 	 * file could not be found
+	 * @throws XmlPullParserException Thrown if the Android manifest file could
+	 * not be read.
 	 */
 	public InfoflowResults analyzeAPKFile(String fileName, boolean enableImplicitFlows,
-			boolean enableStaticFields, boolean flowSensitiveAliasing) throws IOException {
+			boolean enableStaticFields, boolean flowSensitiveAliasing)
+					throws IOException, XmlPullParserException {
 		String androidJars = System.getenv("ANDROID_JARS");
+		if (androidJars == null)
+			androidJars = System.getProperty("ANDROID_JARS");
 		if (androidJars == null)
 			throw new RuntimeException("Android JAR dir not set");
 		System.out.println("Loading Android.jar files from " + androidJars);
@@ -61,12 +67,5 @@ public class JUnitTests {
 		setupApplication.setFlowSensitiveAliasing(flowSensitiveAliasing);
 		return setupApplication.runInfoflow();
 	}
-
-	@Test
-	public void runTest1() throws IOException {
-		InfoflowResults res = analyzeAPKFile
-				("testAPKs/9458cfb51c90130938abcef7173c3f6d44a02720.apk", false, false, false);
-		Assert.assertTrue(res.size() > 0);
-	}
-
+	
 }

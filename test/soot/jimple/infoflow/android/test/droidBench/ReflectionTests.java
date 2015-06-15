@@ -12,39 +12,39 @@ package soot.jimple.infoflow.android.test.droidBench;
 
 import java.io.IOException;
 
-import junit.framework.Assert;
-
+import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.xmlpull.v1.XmlPullParserException;
 
-import soot.jimple.infoflow.InfoflowResults;
+import soot.jimple.infoflow.results.InfoflowResults;
 
 public class ReflectionTests extends JUnitTests {
 	
-	@Test
-	public void runTestReflection1() throws IOException {
-		InfoflowResults res = analyzeAPKFile("Reflection_Reflection1.apk");
+	@Test(timeout=300000)
+	public void runTestReflection1() throws IOException, XmlPullParserException {
+		InfoflowResults res = analyzeAPKFile("Reflection/Reflection1.apk");
 		Assert.assertEquals(1, res.size());
 	}
 
-	@Test
+	@Test(timeout=300000)
 	@Ignore
-	public void runTestReflection2() throws IOException {
-		InfoflowResults res = analyzeAPKFile("Reflection_Reflection2.apk");
+	public void runTestReflection2() throws IOException, XmlPullParserException {
+		InfoflowResults res = analyzeAPKFile("Reflection/Reflection2.apk");
 		Assert.assertEquals(1, res.size());
 	}
 
-	@Test
+	@Test(timeout=300000)
 	@Ignore
-	public void runTestReflection3() throws IOException {
-		InfoflowResults res = analyzeAPKFile("Reflection_Reflection3.apk");
+	public void runTestReflection3() throws IOException, XmlPullParserException {
+		InfoflowResults res = analyzeAPKFile("Reflection/Reflection3.apk");
 		Assert.assertEquals(1, res.size());
 	}
 
-	@Test
+	@Test(timeout=300000)
 	@Ignore
-	public void runTestReflection4() throws IOException {
-		InfoflowResults res = analyzeAPKFile("Reflection_Reflection4.apk");
+	public void runTestReflection4() throws IOException, XmlPullParserException {
+		InfoflowResults res = analyzeAPKFile("Reflection/Reflection4.apk");
 		Assert.assertEquals(1, res.size());
 	}
 

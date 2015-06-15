@@ -5,9 +5,11 @@ soot.jar=
 
 #Location of FlowDroid infoflow jar
 infoflow.jar=
+infoflow-summaries.jar=
 
 # Target JAR file
 infoflow-android.jar=
+infoflow-android-javadoc.jar=
 
 # Path to DroidBench
 droidBenchDir=

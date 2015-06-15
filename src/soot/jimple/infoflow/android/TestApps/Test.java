@@ -17,6 +17,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -27,17 +28,21 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import soot.SootMethod;
-import soot.Unit;
-import soot.jimple.infoflow.InfoflowResults;
+import org.xmlpull.v1.XmlPullParserException;
+
 import soot.jimple.infoflow.IInfoflow.CallgraphAlgorithm;
-import soot.jimple.infoflow.InfoflowResults.SinkInfo;
-import soot.jimple.infoflow.InfoflowResults.SourceInfo;
 import soot.jimple.infoflow.android.SetupApplication;
-import soot.jimple.infoflow.android.AndroidSourceSinkManager.LayoutMatchingMode;
+import soot.jimple.infoflow.android.source.AndroidSourceSinkManager.LayoutMatchingMode;
+import soot.jimple.infoflow.data.pathBuilders.DefaultPathBuilderFactory.PathBuilder;
 import soot.jimple.infoflow.handlers.ResultsAvailableHandler;
+import soot.jimple.infoflow.ipc.IIPCManager;
+import soot.jimple.infoflow.results.InfoflowResults;
+import soot.jimple.infoflow.results.ResultSinkInfo;
+import soot.jimple.infoflow.results.ResultSourceInfo;
+import soot.jimple.infoflow.solver.cfg.IInfoflowCFG;
 import soot.jimple.infoflow.taintWrappers.EasyTaintWrapper;
-import soot.jimple.toolkits.ide.icfg.BiDiInterproceduralCFG;
+import soot.jimple.infoflow.taintWrappers.ITaintPropagationWrapper;
+import soot.jimple.infoflow.taintWrappers.TaintWrapperSet;
 
 public class Test {
 	
@@ -55,18 +60,17 @@ public class Test {
 
 		@Override
 		public void onResultsAvailable(
-				BiDiInterproceduralCFG<Unit, SootMethod> cfg,
-				InfoflowResults results) {
+				IInfoflowCFG cfg, InfoflowResults results) {
 			// Dump the results
 			if (results == null) {
 				print("No results found.");
 			}
 			else {
-				for (SinkInfo sink : results.getResults().keySet()) {
+				for (ResultSinkInfo sink : results.getResults().keySet()) {
 					print("Found a flow to sink " + sink + ", from the following sources:");
-					for (SourceInfo source : results.getResults().get(sink)) {
+					for (ResultSourceInfo source : results.getResults().get(sink)) {
 						print("\t- " + source.getSource() + " (in "
-								+ cfg.getMethodOf(source.getContext()).getSignature()  + ")");
+								+ cfg.getMethodOf(source.getSource()).getSignature()  + ")");
 						if (source.getPath() != null && !source.getPath().isEmpty())
 							print("\t\ton Path " + source.getPath());
 					}
@@ -102,21 +106,33 @@ public class Test {
 	private static boolean flowSensitiveAliasing = true;
 	private static boolean computeResultPaths = true;
 	private static boolean aggressiveTaintWrapper = false;
+	private static boolean librarySummaryTaintWrapper = false;
+	private static String summaryPath = "";
+	private static PathBuilder pathBuilder = PathBuilder.ContextInsensitiveSourceFinder;
 	
 	private static CallgraphAlgorithm callgraphAlgorithm = CallgraphAlgorithm.AutomaticSelection;
 	
 	private static boolean DEBUG = false;
 
+	private static IIPCManager ipcManager = null;
+	public static void setIPCManager(IIPCManager ipcManager)
+	{
+		Test.ipcManager = ipcManager;
+	}
+	public static IIPCManager getIPCManager()
+	{
+		return Test.ipcManager;
+	}
+	
 	/**
-	 * @param args[0] = path to apk-file
-	 * @param args[1] = path to android-dir (path/android-platforms/)
+	 * @param args Program arguments. args[0] = path to apk-file,
+	 * args[1] = path to android-dir (path/android-platforms/)
 	 */
 	public static void main(final String[] args) throws IOException, InterruptedException {
 		if (args.length < 2) {
 			printUsage();	
 			return;
 		}
-		
 		//start with cleanup:
 		File outputDir = new File("JimpleOutput");
 		if (outputDir.isDirectory()){
@@ -138,7 +154,6 @@ public class Test {
 		
 		List<String> apkFiles = new ArrayList<String>();
 		File apkFile = new File(args[0]);
-		String extension = apkFile.getName().substring(apkFile.getName().lastIndexOf("."));
 		if (apkFile.isDirectory()) {
 			String[] dirFiles = apkFile.list(new FilenameFilter() {
 			
@@ -150,19 +165,22 @@ public class Test {
 			});
 			for (String s : dirFiles)
 				apkFiles.add(s);
-		}
-		else if (extension.equalsIgnoreCase(".txt")) {
-			BufferedReader rdr = new BufferedReader(new FileReader(apkFile));
-			String line = null;
-			while ((line = rdr.readLine()) != null)
-				apkFiles.add(line);
-			rdr.close();
-		}
-		else if (extension.equalsIgnoreCase(".apk"))
-			apkFiles.add(args[0]);
-		else {
-			System.err.println("Invalid input file format: " + extension);
-			return;
+		} else {
+			//apk is a file so grab the extension
+			String extension = apkFile.getName().substring(apkFile.getName().lastIndexOf("."));
+			if (extension.equalsIgnoreCase(".txt")) {
+				BufferedReader rdr = new BufferedReader(new FileReader(apkFile));
+				String line = null;
+				while ((line = rdr.readLine()) != null)
+					apkFiles.add(line);
+				rdr.close();
+			}
+			else if (extension.equalsIgnoreCase(".apk"))
+				apkFiles.add(args[0]);
+			else {
+				System.err.println("Invalid input file format: " + extension);
+				return;
+			}
 		}
 
 		for (final String fileName : apkFiles) {
@@ -227,10 +245,14 @@ public class Test {
 				String algo = args[i+1];
 				if (algo.equalsIgnoreCase("AUTO"))
 					callgraphAlgorithm = CallgraphAlgorithm.AutomaticSelection;
+				else if (algo.equalsIgnoreCase("CHA"))
+					callgraphAlgorithm = CallgraphAlgorithm.CHA;
 				else if (algo.equalsIgnoreCase("VTA"))
 					callgraphAlgorithm = CallgraphAlgorithm.VTA;
 				else if (algo.equalsIgnoreCase("RTA"))
 					callgraphAlgorithm = CallgraphAlgorithm.RTA;
+				else if (algo.equalsIgnoreCase("SPARK"))
+					callgraphAlgorithm = CallgraphAlgorithm.SPARK;
 				else {
 					System.err.println("Invalid callgraph algorithm");
 					return false;
@@ -271,6 +293,28 @@ public class Test {
 				aggressiveTaintWrapper = false;
 				i++;
 			}
+			else if (args[i].equalsIgnoreCase("--pathalgo")) {
+				String algo = args[i+1];
+				if (algo.equalsIgnoreCase("CONTEXTSENSITIVE"))
+					pathBuilder = PathBuilder.ContextSensitive;
+				else if (algo.equalsIgnoreCase("CONTEXTINSENSITIVE"))
+					pathBuilder = PathBuilder.ContextInsensitive;
+				else if (algo.equalsIgnoreCase("SOURCESONLY"))
+					pathBuilder = PathBuilder.ContextInsensitiveSourceFinder;
+				else {
+					System.err.println("Invalid path reconstruction algorithm");
+					return false;
+				}
+				i += 2;
+			}
+			else if (args[i].equalsIgnoreCase("--libsumtw")) {
+				librarySummaryTaintWrapper = true;
+				i++;
+			}
+			else if (args[i].equalsIgnoreCase("--summarypath")) {
+				summaryPath = args[i + 1];
+				i += 2;
+			}
 			else
 				i++;
 		}
@@ -279,6 +323,16 @@ public class Test {
 	
 	private static boolean validateAdditionalOptions() {
 		if (timeout > 0 && sysTimeout > 0) {
+			return false;
+		}
+		if (!flowSensitiveAliasing && callgraphAlgorithm != CallgraphAlgorithm.OnDemand
+				&& callgraphAlgorithm != CallgraphAlgorithm.AutomaticSelection) {
+			System.err.println("Flow-insensitive aliasing can only be configured for callgraph "
+					+ "algorithms that support this choice.");
+			return false;
+		}
+		if (librarySummaryTaintWrapper && summaryPath.isEmpty()) {
+			System.err.println("Summary path must be specified when using library summaries");
 			return false;
 		}
 		return true;
@@ -350,7 +404,8 @@ public class Test {
 				"--layoutmode", layoutMatchingModeToString(layoutMatchingMode),
 				flowSensitiveAliasing ? "--aliasflowsens" : "--aliasflowins",
 				computeResultPaths ? "--paths" : "--nopaths",
-				aggressiveTaintWrapper ? "--aggressivetw" : "--nonaggressivetw" };
+				aggressiveTaintWrapper ? "--aggressivetw" : "--nonaggressivetw",
+				"--pathalgo", pathAlgorithmToString(pathBuilder) };
 		System.out.println("Running command: " + executable + " " + command);
 		try {
 			ProcessBuilder pb = new ProcessBuilder(command);
@@ -367,20 +422,24 @@ public class Test {
 		}
 	}
 	
-	public static String callgraphAlgorithmToString(CallgraphAlgorithm algorihm) {
+	private static String callgraphAlgorithmToString(CallgraphAlgorithm algorihm) {
 		switch (algorihm) {
 			case AutomaticSelection:
 				return "AUTO";
+			case CHA:
+				return "CHA";
 			case VTA:
 				return "VTA";
 			case RTA:
 				return "RTA";
+			case SPARK:
+				return "SPARK";
 			default:
 				return "unknown";
 		}
 	}
 
-	public static String layoutMatchingModeToString(LayoutMatchingMode mode) {
+	private static String layoutMatchingModeToString(LayoutMatchingMode mode) {
 		switch (mode) {
 			case NoMatch:
 				return "NONE";
@@ -392,12 +451,33 @@ public class Test {
 				return "unknown";
 		}
 	}
-
+	
+	private static String pathAlgorithmToString(PathBuilder pathBuilder) {
+		switch (pathBuilder) {
+			case ContextSensitive:
+				return "CONTEXTSENSITIVE";
+			case ContextInsensitive :
+				return "CONTEXTINSENSITIVE";
+			case ContextInsensitiveSourceFinder :
+				return "SOURCESONLY";
+			default :
+				return "UNKNOWN";
+		}
+	}
+	
 	private static InfoflowResults runAnalysis(final String fileName, final String androidJar) {
 		try {
 			final long beforeRun = System.nanoTime();
-				
-			final SetupApplication app = new SetupApplication(androidJar, fileName);
+
+			final SetupApplication app;
+			if (null == ipcManager)
+			{
+				app = new SetupApplication(androidJar, fileName);
+			}
+			else
+			{
+				app = new SetupApplication(androidJar, fileName, ipcManager);
+			}
 
 			app.setStopAfterFirstFlow(stopAfterFirstFlow);
 			app.setEnableImplicitFlows(implicitFlows);
@@ -407,16 +487,26 @@ public class Test {
 			app.setAccessPathLength(accessPathLength);
 			app.setLayoutMatchingMode(layoutMatchingMode);
 			app.setFlowSensitiveAliasing(flowSensitiveAliasing);
+			app.setPathBuilder(pathBuilder);
 			app.setComputeResultPaths(computeResultPaths);
-
-			final EasyTaintWrapper taintWrapper;
-			if (new File("../soot-infoflow/EasyTaintWrapperSource.txt").exists())
-				taintWrapper = new EasyTaintWrapper("../soot-infoflow/EasyTaintWrapperSource.txt");
-			else
-				taintWrapper = new EasyTaintWrapper("EasyTaintWrapperSource.txt");
-			taintWrapper.setAggressiveMode(aggressiveTaintWrapper);
+			
+			final ITaintPropagationWrapper taintWrapper;
+			if (librarySummaryTaintWrapper) {
+				taintWrapper = createLibrarySummaryTW();
+			}
+			else {
+				final EasyTaintWrapper easyTaintWrapper;
+				if (new File("../soot-infoflow/EasyTaintWrapperSource.txt").exists())
+					easyTaintWrapper = new EasyTaintWrapper("../soot-infoflow/EasyTaintWrapperSource.txt");
+				else
+					easyTaintWrapper = new EasyTaintWrapper("EasyTaintWrapperSource.txt");
+				easyTaintWrapper.setAggressiveMode(aggressiveTaintWrapper);
+				taintWrapper = easyTaintWrapper;
+			}
 			app.setTaintWrapper(taintWrapper);
 			app.calculateSourcesSinksEntrypoints("SourcesAndSinks.txt");
+			//app.calculateSourcesSinksEntrypoints("SuSiExport.xml");
+			
 			
 			if (DEBUG) {
 				app.printEntrypoints();
@@ -432,6 +522,49 @@ public class Test {
 			System.err.println("Could not read file: " + ex.getMessage());
 			ex.printStackTrace();
 			throw new RuntimeException(ex);
+		} catch (XmlPullParserException ex) {
+			System.err.println("Could not read Android manifest file: " + ex.getMessage());
+			ex.printStackTrace();
+			throw new RuntimeException(ex);
+		}
+	}
+	
+	/**
+	 * Creates the taint wrapper for using library summaries
+	 * @return The taint wrapper for using library summaries
+	 * @throws IOException Thrown if one of the required files could not be read
+	 */
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	private static ITaintPropagationWrapper createLibrarySummaryTW()
+			throws IOException {
+		try {
+			Class clzLazySummary = Class.forName("soot.jimple.infoflow.methodSummary.data.impl.LazySummary");
+			
+			Object lazySummary = clzLazySummary.getConstructor(File.class).newInstance(new File(summaryPath));
+			
+			ITaintPropagationWrapper summaryWrapper = (ITaintPropagationWrapper) Class.forName
+					("soot.jimple.infoflow.methodSummary.taintWrappers.SummaryTaintWrapper").getConstructor
+					(clzLazySummary).newInstance(lazySummary);
+			
+			final TaintWrapperSet taintWrapperSet = new TaintWrapperSet();
+			taintWrapperSet.addWrapper(summaryWrapper);
+			taintWrapperSet.addWrapper(new EasyTaintWrapper("EasyTaintWrapperConversion.txt"));
+			return taintWrapperSet;
+		}
+		catch (ClassNotFoundException | NoSuchMethodException ex) {
+			System.err.println("Could not find library summary classes: " + ex.getMessage());
+			ex.printStackTrace();
+			return null;
+		}
+		catch (InvocationTargetException ex) {
+			System.err.println("Could not initialize library summaries: " + ex.getMessage());
+			ex.printStackTrace();
+			return null;
+		}
+		catch (IllegalAccessException | InstantiationException ex) {
+			System.err.println("Internal error in library summary initialization: " + ex.getMessage());
+			ex.printStackTrace();
+			return null;
 		}
 	}
 
@@ -453,9 +586,13 @@ public class Test {
 		System.out.println("\t--ALIASFLOWINS Use a flow insensitive alias search");
 		System.out.println("\t--NOPATHS Do not compute result paths");
 		System.out.println("\t--AGGRESSIVETW Use taint wrapper in aggressive mode");
+		System.out.println("\t--PATHALGO Use path reconstruction algorithm x");
+		System.out.println("\t--LIBSUMTW Use library summary taint wrapper");
+		System.out.println("\t--SUMMARYPATH Path to library summaries");
 		System.out.println();
-		System.out.println("Supported callgraph algorithms: AUTO, RTA, VTA");
+		System.out.println("Supported callgraph algorithms: AUTO, CHA, RTA, VTA, SPARK");
 		System.out.println("Supported layout mode algorithms: NONE, PWD, ALL");
+		System.out.println("Supported path algorithms: CONTEXTSENSITIVE, CONTEXTINSENSITIVE, SOURCESONLY");
 	}
 
 }
