@@ -6,8 +6,8 @@
 	        	 unless="soot.jar"
 	        />
 	    </target>
-	
-	
+
+
 	<target name="clean">
 		<delete quiet="true" dir="build" />
 	</target>
@@ -37,6 +37,22 @@
 			</manifest>
 		</jar>
 	</target>
+
+    <target name="fulljar" depends="jar">
+      <mkdir dir="META-INF"/>
+
+        <manifest file="META-INF/MANIFEST.MF">
+           <attribute name="Main-Class" value="soot.jimple.infoflow.android.TestApps.Test"/>
+        </manifest>
+
+        <jar destfile="full-${infoflow-android.jar}" manifest="META-INF/MANIFEST.MF">
+            <zipfileset src="${infoflow-android.jar}"/>
+            <zipfileset src="lib/AXMLPrinter2.jar"/>
+            <zipfileset src="lib/axml-2.0.jar"/>
+            <fileset dir="src" includes="res/AndroidCallbacks.txt"/>
+        </jar>
+    <delete dir="META-INF"/>
+    </target>
 
 	<target name="compiletests" depends="settings,compile">
 		<mkdir dir="build/testclasses" />
